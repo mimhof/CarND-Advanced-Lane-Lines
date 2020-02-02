@@ -21,7 +21,14 @@ class Thresholding(object):
     """Class to apply transforms and thresholds to the road images."""
 
     def __init__(self, image, thresholds, sobel_kernel=3):
-        self._image = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)[:, :, 2]
+        """
+        Initialize attributes and Sobel x and y gradients.
+
+        :param image: A one-channel image object (Gray scale, S-Channel, etc.)
+        :param thresholds: A Thresholds object for x, y, mag, and dir.
+        :param sobel_kernel: Size of the Sobel kernel to use.
+        """
+        self._image = image
         self._thresholds = thresholds
         self._sobel_kernel = sobel_kernel
         self._sobel_x, self._sobel_y = self._calculate_sobel_gradients(
@@ -110,7 +117,8 @@ if __name__ == '__main__':
     img = plt.imread("test_images/straight_lines1.jpg")
     undist = camera_cal.undistort_image(img)
     thresholds = Thresholds()
-    thresh = Thresholding(undist, thresholds, sobel_kernel=5)
+    s_chan = cv2.cvtColor(undist, cv2.COLOR_RGB2HLS)[:, :, 2]
+    thresh = Thresholding(s_chan, thresholds, sobel_kernel=5)
     binary = thresh.combine_gradients()
     warped = camera_cal.warp_image(binary)
 
