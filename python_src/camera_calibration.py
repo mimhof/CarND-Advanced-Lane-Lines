@@ -21,7 +21,8 @@ class CameraCalibration(object):
         # Source points from test_images/straight_lines2.jpg
         self._imshape = (1280, 720)
         offset = 200
-        src = np.float32([[275, 679], [588, 455], [698, 455], [1042, 679]])
+        # src = np.float32([[275, 679], [588, 455], [698, 455], [1042, 679]])
+        src = np.float32([[218, 720], [588, 455], [698, 455], [1119, 720]])
         dst = np.float32([[offset, self._imshape[1]],
                           [offset, 0],
                           [self._imshape[0]-offset, 0],
@@ -95,7 +96,7 @@ if __name__ == '__main__':
     # pickle.dump(pickle_dict, open("distortion_cal.p", "wb"))
 
     from matplotlib import pyplot as plt
-    test_img = plt.imread('test_images/test3.jpg')
+    test_img = plt.imread('test_images/test1.jpg')
     camera_cal = CameraCalibration()
     undist = camera_cal.undistort_image(test_img)
     warped = camera_cal.warp_image(undist)

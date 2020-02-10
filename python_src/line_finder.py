@@ -1,5 +1,5 @@
 # Written by: Michael Imhof
-# Date: 01/31/2020
+# Date: 02/01/2020
 # Part of Udacity Self-Driving Car Nanodegree
 # Advanced Lane Finding Project
 
@@ -12,32 +12,26 @@ from matplotlib import pyplot as plt
 class LineFinder(object):
     """Class contains methods to find lane lines."""
 
-    def __init__(self, image, margin=100):
+    def __init__(self, margin=100):
         """
 
-        :param image: A binary birds-eye view image.
         """
-        self._image = image
-        self._imshape = self._image.shape
         self._left_fit = None
         self._right_fit = None
-        self._ploty = np.linspace(0, self._imshape[0] - 1, self._imshape[0])
         self._leftx = None
         self._lefty = None
         self._rightx = None
         self._righty = None
         self._margin = margin
 
-        # Create an output image to draw on and visualize the result
-        self._out_img = np.dstack((self._image, self._image, self._image))
-
     @property
     def polynomials(self):
         return self._left_fit, self._right_fit
 
-    def _find_lane_pixels(self, nwindows=9, minpix=50):
+    def _find_lane_pixels(self, image, nwindows=9, minpix=50):
+        imshape = image.shape
         # Take a histogram of the bottom half of the image
-        histogram = np.sum(self._image[self._imshape[0] // 2:, :], axis=0)
+        histogram = np.sum(image[imshape[0] // 2:, :], axis=0)
 
         # Find the peak of the left and right halves of the histogram
         # These will be the starting point for the left and right lines
@@ -46,9 +40,9 @@ class LineFinder(object):
         rightx_base = np.argmax(histogram[midpoint:]) + midpoint
 
         # Set height of windows - based on nwindows above and image shape
-        window_height = np.int(self._imshape[0] // nwindows)
+        window_height = np.int(imshape[0] // nwindows)
         # Identify the x and y positions of all nonzero pixels in the image
-        nonzero = self._image.nonzero()
+        nonzero = image.nonzero()
         nonzeroy = np.array(nonzero[0])
         nonzerox = np.array(nonzero[1])
         # Current positions to be updated later for each window in nwindows
@@ -62,18 +56,12 @@ class LineFinder(object):
         # Step through the windows one by one
         for window in range(nwindows):
             # Identify window boundaries in x and y (and right and left)
-            win_y_low = self._imshape[0] - (window + 1) * window_height
-            win_y_high = self._imshape[0] - window * window_height
+            win_y_low = imshape[0] - (window + 1) * window_height
+            win_y_high = imshape[0] - window * window_height
             win_xleft_low = leftx_current - self._margin
             win_xleft_high = leftx_current + self._margin
             win_xright_low = rightx_current - self._margin
             win_xright_high = rightx_current + self._margin
-
-            # Draw the windows on the visualization image
-            cv2.rectangle(self._out_img, (win_xleft_low, win_y_low),
-                          (win_xleft_high, win_y_high), (0, 255, 0), 2)
-            cv2.rectangle(self._out_img, (win_xright_low, win_y_low),
-                          (win_xright_high, win_y_high), (0, 255, 0), 2)
 
             good_left_inds = ((nonzeroy >= win_y_low) &
                               (nonzeroy < win_y_high) &
@@ -125,8 +113,8 @@ class LineFinder(object):
 
         return left_fitx, right_fitx
 
-    def _search_around_poly(self):
-        nonzero = self._image.nonzero()
+    def _search_around_poly(self, image):
+        nonzero = image.nonzero()
         nonzeroy = np.array(nonzero[0])
         nonzerox = np.array(nonzero[1])
 
@@ -145,25 +133,25 @@ class LineFinder(object):
         self._rightx = nonzerox[right_lane_inds]
         self._righty = nonzeroy[right_lane_inds]
 
-    def find_lane_lines(self, reset=False):
+    def find_lane_lines(self, image, reset=False):
         if reset or self._left_fit is None or self._right_fit is None:
-            self._find_lane_pixels()
+            self._find_lane_pixels(image)
         else:
-            self._search_around_poly()
+            self._search_around_poly(image)
         self._fit_polynomial(order=2)
 
-    def evaluate_polynomials(self):
+    def evaluate_polynomials(self, y):
         try:
-            left_fitx = np.polyval(self._left_fit, self._ploty)
-            right_fitx = np.polyval(self._right_fit, self._ploty)
+            left_fitx = np.polyval(self._left_fit, y)
+            right_fitx = np.polyval(self._right_fit, y)
         except TypeError:
             # Avoids an error if `left` and `right_fit` are still
             # none or incorrect
             print('The function failed to fit a line!')
-            left_fitx = 1 * self._ploty ** 2 + 1 * self._ploty
-            right_fitx = 1 * self._ploty ** 2 + 1 * self._ploty
+            left_fitx = 1 * y ** 2 + 1 * y
+            right_fitx = 1 * y ** 2 + 1 * y
 
-        return left_fitx, right_fitx, self._ploty
+        return left_fitx, right_fitx
 
 
 if __name__ == '__main__':
@@ -175,25 +163,29 @@ if __name__ == '__main__':
     undist = camera_cal.undistort_image(img)
     thresholds = Thresholds()
     s_chan = cv2.cvtColor(undist, cv2.COLOR_RGB2HLS)[:, :, 2]
-    thresh = Thresholding(s_chan, thresholds, sobel_kernel=5)
-    binary = thresh.combine_gradients()
+    thresh = Thresholding(thresholds, sobel_kernel=5)
+    binary = thresh.combine_gradients(s_chan)
     warped = camera_cal.warp_image(binary)
 
-    line_finder = LineFinder(warped, margin=200)
-    line_finder.find_lane_lines()
+    line_finder = LineFinder(margin=200)
+    line_finder.find_lane_lines(warped)
     # line_finder.find_lane_lines()
-    left_x, right_x, y = line_finder.evaluate_polynomials()
+    imshape = warped.shape
+    ploty = np.linspace(0, imshape[0] - 1, imshape[0])
+    left_x, right_x = line_finder.evaluate_polynomials(ploty)
 
     empty_image = np.zeros_like(img)
-    cv2.polylines(empty_image,
-                  [np.array([[a, b] for (a, b) in zip(left_x, y)], np.int0)],
-                  False, [255, 0, 0], 50)
-    cv2.polylines(empty_image,
-                  [np.array([[a, b] for (a, b) in zip(right_x, y)], np.int0)],
-                  False, [255, 0, 0], 50)
+    cv2.polylines(
+        empty_image,
+        [np.array([[a, b] for (a, b) in zip(left_x, ploty)], np.int0)],
+        False, [255, 0, 0], 50)
+    cv2.polylines(
+        empty_image,
+        [np.array([[a, b] for (a, b) in zip(right_x, ploty)], np.int0)],
+        False, [255, 0, 0], 50)
     total_pts = np.concatenate([
-        np.array([[a, b] for (a, b) in zip(left_x, y)], np.int0),
-        np.flipud(np.array([[a, b] for (a, b) in zip(right_x, y)], np.int0))])
+        np.array([[a, b] for (a, b) in zip(left_x, ploty)], np.int0),
+        np.flipud(np.array([[a, b] for (a, b) in zip(right_x, ploty)], np.int0))])
     cv2.fillPoly(empty_image, [total_pts], (0, 255, 0))
     empty_unwarped = camera_cal.unwarp_image(empty_image)
     result = cv2.addWeighted(undist, 1, empty_unwarped, 0.3, 0)
@@ -203,6 +195,6 @@ if __name__ == '__main__':
     ax0.imshow(result)
     ax1 = fig.add_subplot(122)
     ax1.imshow(warped, cmap='gray')
-    ax1.plot(left_x, y, '-y', linewidth=3)
-    ax1.plot(right_x, y, '-y', linewidth=3)
+    ax1.plot(left_x, ploty, '-y', linewidth=3)
+    ax1.plot(right_x, ploty, '-y', linewidth=3)
     plt.show()
