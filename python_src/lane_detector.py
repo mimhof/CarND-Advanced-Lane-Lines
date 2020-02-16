@@ -8,6 +8,7 @@ import numpy as np
 from collections import deque
 import cv2
 from matplotlib import pyplot as plt
+import os
 from python_src.camera_calibration import CameraCalibration
 from python_src.thresholding import Thresholding, Thresholds
 from python_src.line_finder import LineFinder
@@ -16,9 +17,10 @@ from python_src.line_finder import LineFinder
 class Line(object):
     """Class holds the current attributes describing the current line."""
 
-    def __init__(self, ploty, history_len=30):
+    def __init__(self, ploty, history_len=30, use_equal_weights=True):
         self._ploty = ploty
         self._history_len = history_len
+        self._use_equal_weights = use_equal_weights
         # was the line detected in the last iteration?
         self.detected = False
         # x values of the last n fits of the line
@@ -37,51 +39,71 @@ class Line(object):
         self._ym_per_pix = 30 / 720  # meters per pixel in y dimension
         self._xm_per_pix = 3.7 / 847  # meters per pixel in x dimension
 
+        self.bad_frames = 0
+
     def append(self, poly, xvals):
-        # Set current_fit to poly
-        self.current_fit = poly
 
-        # Append xvals to the deque
-        self._recent_xfitted.append(xvals)
+        curverad = self.compute_curvature(xvals, self._ploty)
+        self.detected = self.sanity_check_lane(curverad)
 
-        # Update bestx
-        self.bestx = np.mean(self._recent_xfitted, axis=0)
+        if self.detected:
+            # Append xvals to the deque
+            self._recent_xfitted.append(xvals)
+            # Set current_fit to poly
+            self.current_fit = poly
 
-        # Calculate a new polynomial based on bestx
-        self.best_fit = np.polyfit(self._ploty, self.bestx, 2)
+            # Update bestx
+            if len(self._recent_xfitted) == 1:
+                self.bestx = np.mean(self._recent_xfitted, axis=0)
+            else:
+                weights = np.zeros(len(self._recent_xfitted))
+                if self._use_equal_weights:
+                    weights[:] = 1.0 / len(weights)
+                else:
+                    weights[0] = 0.5
+                    weights[1:] = (1.0 - weights[0]) / (len(weights) - 1)
+                self.bestx = np.sum([x*y for x, y in
+                                     zip(weights, self._recent_xfitted)], axis=0)
 
-        # Calculate curvature
-        self._find_curvature()
+            # Calculate a new polynomial based on bestx
+            self.best_fit = np.polyfit(self._ploty, self.bestx, 2)
 
-        # Determine line_base_pos
-        self._find_line_base_pos()
+            curverad = self.compute_curvature(self.bestx, self._ploty)
+            self.radius_of_curvature = curverad
+
+            # Determine line_base_pos
+            self._find_line_base_pos()
+
+            self.bad_frames = 0
+
+        else:
+            self.bad_frames += 1
 
     def _find_line_base_pos(self):
         # Determine distance of line from vehicle center
         self.line_base_pos = (self.bestx[0] - 640) * self._xm_per_pix
 
-    def _find_curvature(self):
-        y_eval = np.max(self._ploty)
-        polyfit_cr = np.polyfit(self._ploty * self._ym_per_pix,
-                                self.bestx * self._xm_per_pix, 2)
-        self.radius_of_curvature = Line.calculate_curvature(
-            polyfit_cr, y_eval * self._ym_per_pix)
-
-    @staticmethod
-    def calculate_curvature(poly, y):
-        return ((1 + (2 * poly[0] * y + poly[1]) ** 2) ** 1.5) / abs(2 * poly[0])
+    def compute_curvature(self, xvals, yvals):
+        fit = np.polyfit(
+            yvals * self._ym_per_pix, xvals * self._xm_per_pix, 2)
+        y_eval = np.max(yvals)
+        curveature = ((1 + (2 * fit[0] * y_eval + fit[1]) ** 2) ** 1.5) /\
+            np.absolute(2 * fit[0])
+        return curveature
 
     def reset(self):
         last_val = self._recent_xfitted.pop()
         self._recent_xfitted.clear()
         self._recent_xfitted.append(last_val)
         self.best_fit = self.current_fit
-        self._find_curvature()
+        self.radius_of_curvature = self.compute_curvature(last_val, self._ploty)
         self._find_line_base_pos()
 
-
-def sanity_check(left_line, right_line):
-    return True
+    def sanity_check_lane(self, new_curvature):
+        if self.radius_of_curvature is None:
+            return True
+        return (abs(new_curvature - self.radius_of_curvature) /
+                self.radius_of_curvature) <= 0.5
 
 
 class LaneDetector(object):
@@ -105,12 +127,17 @@ class LaneDetector(object):
         hls_image = cv2.cvtColor(undist, cv2.COLOR_RGB2HLS)
         s_chan = hls_image[:, :, 2]
         l_chan = hls_image[:, :, 1]
+        gray_image = cv2.cvtColor(undist, cv2.COLOR_RGB2GRAY)
 
         # Threshold image based on Thresholds
-        binary = self._thresh.combine_gradients(s_chan)
+        s_binary = self._thresh.combine_gradients(s_chan)
+        l_binary = self._thresh.combine_gradients(l_chan)
+        gray_binary = self._thresh.combine_gradients(gray_image)
+        combined = np.zeros_like(gray_binary)
+        combined[(s_binary == 1) | (l_binary == 1) | (gray_binary == 1)] = 1
 
         # Warp the image to bird's-eye view
-        warped = self._camera_cal.warp_image(binary)
+        warped = self._camera_cal.warp_image(combined)
 
         # Find the lane lines
         self._line_finder.find_lane_lines(warped, reset=reset)
@@ -122,18 +149,19 @@ class LaneDetector(object):
         self._left_line.append(polynomials[0], left_x)
         self._right_line.append(polynomials[1], right_x)
 
-        sane_lines = sanity_check(self._left_line, self._right_line)
-        self._left_line.detected = sane_lines
-        self._right_line.detected = sane_lines
+        detected_left = self._left_line.bad_frames < 10
+        detected_right = self._right_line.bad_frames < 10
 
-        if sane_lines is False:
+        if detected_left and detected_right and not reset:
+            left_x = self._left_line.bestx
+            right_x = self._right_line.bestx
+            detected = True
+        else:
             # Reset the line finder
             self._line_finder.find_lane_lines(warped, reset=True)
             self._left_line.reset()
             self._right_line.reset()
-        else:
-            left_x = self._left_line.bestx
-            right_x = self._right_line.bestx
+            detected = False
 
         # Draw lane lines on an empty image
         drawn_image = np.zeros_like(image)
@@ -180,16 +208,34 @@ class LaneDetector(object):
         cv2.putText(result,
                     message,
                     (30, 120), font, 2, font_color, 2)
+        # cv2.putText(result,
+        #             'Tracking Locked' if detected else 'Tracking Lost Lock',
+        #             (30, 180), font, 2,
+        #             [0, 255, 0] if detected else [255, 0, 0], 2)
 
         return result
 
 
 if __name__ == '__main__':
     from moviepy.editor import VideoFileClip
+
+    # Process the test images
+    # for imfile in os.listdir('test_images/'):
+    #     lane_detector = LaneDetector()
+    #     img = plt.imread('test_images/' + imfile)
+    #     result = lane_detector.find_lane(img, reset=True)
+    #     plt.imsave('output_images/' + imfile, result, format='jpg')
+
+    # Process the project videos
+    # lane_detector = LaneDetector()
+    # file_clip = VideoFileClip('project_video.mp4')
+    # clip = file_clip.fl_image(lane_detector.find_lane)
+    # clip.write_videofile('project_video_out.mp4', audio=False)
+    # lane_detector = LaneDetector()
+    # file_clip = VideoFileClip('challenge_video.mp4')
+    # clip = file_clip.fl_image(lane_detector.find_lane)
+    # clip.write_videofile('challenge_video_out.mp4', audio=False)
     lane_detector = LaneDetector()
-    file_clip = VideoFileClip('project_video.mp4').subclip(0, 5)
-    # img = plt.imread('test_images/test1.jpg')
+    file_clip = VideoFileClip('harder_challenge_video.mp4')
     clip = file_clip.fl_image(lane_detector.find_lane)
-    # plt.imshow(lane_detector.find_lane(img, reset=False))
-    clip.write_videofile('project_video_out.mp4', audio=False)
-    plt.show()
+    clip.write_videofile('harder_challenge_video_out.mp4', audio=False)

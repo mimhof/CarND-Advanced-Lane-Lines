@@ -97,9 +97,15 @@ if __name__ == '__main__':
 
     from matplotlib import pyplot as plt
     test_img = plt.imread('test_images/test1.jpg')
+    # test_img = plt.imread('camera_cal/calibration1.jpg')
     camera_cal = CameraCalibration()
     undist = camera_cal.undistort_image(test_img)
     warped = camera_cal.warp_image(undist)
+    # plt.imsave('writeup_media/calibration_image_distorted.jpg', test_img)
+    # plt.imsave('writeup_media/calibration_image_undistorted.jpg', undist)
+    plt.imsave('writeup_media/test_image_distorted.jpg', test_img)
+    plt.imsave('writeup_media/test_image_undistorted.jpg', undist)
+    plt.imsave('writeup_media/test_image_warped.jpg', warped)
     plt.figure(figsize=(16, 8))
     plt.imshow(warped)
     plt.show()

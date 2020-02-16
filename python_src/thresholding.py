@@ -118,18 +118,20 @@ if __name__ == '__main__':
     from matplotlib import pyplot as plt
 
     camera_cal = CameraCalibration()
-    img = plt.imread("test_images/straight_lines1.jpg")
+    img = plt.imread("test_images/test1.jpg")
     undist = camera_cal.undistort_image(img)
     thresholds = Thresholds()
-    s_chan = cv2.cvtColor(undist, cv2.COLOR_RGB2HLS)[:, :, 2]
+    hls_image = cv2.cvtColor(undist, cv2.COLOR_RGB2HLS)
+    s_chan = hls_image[:, :, 2]
+    l_chan = hls_image[:, :, 1]
+    gray_image = cv2.cvtColor(undist, cv2.COLOR_RGB2GRAY)
     thresh = Thresholding(thresholds, sobel_kernel=5)
-    binary = thresh.combine_gradients(s_chan)
-    warped = camera_cal.warp_image(binary)
+    s_binary = thresh.combine_gradients(s_chan)
+    l_binary = thresh.combine_gradients(l_chan)
+    gray_binary = thresh.combine_gradients(gray_image)
+    s_warped = camera_cal.warp_image(s_binary)
 
-    fig = plt.figure(figsize=(20, 10))
-    ax0 = fig.add_subplot(121)
-    ax0.imshow(binary, cmap='gray')
-    ax1 = fig.add_subplot(122)
-    ax1.imshow(warped, cmap='gray')
-
-    plt.show()
+    plt.imsave("writeup_media/s_channel_binary.jpg", s_binary)
+    plt.imsave("writeup_media/l_channel_binary.jpg", l_binary)
+    plt.imsave("writeup_media/gray_binary.jpg", gray_binary)
+    plt.imsave("writeup_media/s_channel_warped.jpg", s_warped)
