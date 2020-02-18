@@ -134,7 +134,7 @@ class LaneDetector(object):
         l_binary = self._thresh.combine_gradients(l_chan)
         gray_binary = self._thresh.combine_gradients(gray_image)
         combined = np.zeros_like(gray_binary)
-        combined[(s_binary == 1) | (l_binary == 1) | (gray_binary == 1)] = 1
+        combined[(s_binary == 1) | (gray_binary == 1)] = 1
 
         # Warp the image to bird's-eye view
         warped = self._camera_cal.warp_image(combined)
